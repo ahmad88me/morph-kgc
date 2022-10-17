@@ -17,5 +17,5 @@ __pycache__/
 .cache*
 .project
 .DS_Store
-
+.venv
 *.pyc
