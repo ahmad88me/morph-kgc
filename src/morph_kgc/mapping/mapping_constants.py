@@ -125,10 +125,19 @@ FUNCTION_PARSING_QUERY = """
             ?exec fnml:function ?func. 
       
         # output --------------------------------------------------------
-        
+        {
         ?_predicate_object_map rr:objectMap ?object_map .
         ?func fno:returns ?output_list.
         ?output_list rdf:first ?parameter_uri.
-        BIND(fno:Output AS ?parameter_map_type).        
+        BIND(fno:Output AS ?parameter_map_type).   
+        } UNION   
+        
+        # input --------------------------------------------------------
+        {
+        ?_predicate_object_map rr:objectMap ?object_map .
+        ?func fno:expects ?input_list.
+        ?input_list ? ?parameter_uri.
+        BIND(fno:Output AS ?parameter_map_type).   
+         } 
     }
 """
