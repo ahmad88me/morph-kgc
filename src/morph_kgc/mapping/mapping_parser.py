@@ -1,16 +1,19 @@
 __author__ = "Julián Arenas-Guerrero"
-__credits__ = ["Julián Arenas-Guerrero"]
+__credits__ = ["Julián Arenas-Guerrero", "Ahmad Alobaid"]
 
 __license__ = "Apache-2.0"
 __maintainer__ = "Julián Arenas-Guerrero"
 __email__ = "arenas.guerrero.julian@outlook.com"
 
-
 import sys
 
 from ..constants import *
 from ..utils import *
+<<<<<<< HEAD
 from ..mapping.mapping_constants import FUNCTIONS_DATAFRAME_COLUMNS, MAPPINGS_DATAFRAME_COLUMNS, MAPPING_PARSING_QUERY, JOIN_CONDITION_PARSING_QUERY
+=======
+from ..mapping.mapping_constants import *
+>>>>>>> ef574ab914ded6369ac73a60d909e43b20423d82
 from ..mapping.mapping_partitioner import MappingPartitioner
 from ..data_source.relational_database import get_rdb_reference_datatype
 from ..mapping import mapping_fno as fno
@@ -24,15 +27,15 @@ def retrieve_mappings(config):
         mappings_parser = MappingParser(config)
 
         start_time = time.time()
-        mappings = mappings_parser.parse_mappings()
+        rml_df, fno_df = mappings_parser.parse_mappings()
         logging.info(f'Mappings processed in {get_delta_time(start_time)} seconds.')
 
     if config.is_write_parsed_mappings_file_provided():
-        mappings.sort_values(by=['id'], axis=0).to_csv(config.get_parsed_mappings_write_path(), index=False)
+        mappings.sort_values(by=['triples_map_id'], axis=0).to_csv(config.get_parsed_mappings_write_path(), index=False)
         logging.info('Parsed mapping rules saved to file.')
         sys.exit()
 
-    return mappings
+    return rml_df, fno_df
 
 
 def _mapping_to_rml_star(mapping_graph):
@@ -65,24 +68,33 @@ def _mapping_to_rml_star(mapping_graph):
 
     # replace RML properties with the equivalent RML-star properties
     mapping_graph = replace_predicates_in_graph(mapping_graph, R2RML_SUBJECT_MAP, RML_STAR_SUBJECT_MAP)
-    mapping_graph = replace_predicates_in_graph(mapping_graph, R2RML_SUBJECT_CONSTANT_SHORTCUT, RML_STAR_SUBJECT_CONSTANT_SHORTCUT)
+    mapping_graph = replace_predicates_in_graph(mapping_graph, R2RML_SUBJECT_SHORTCUT,
+                                                RML_STAR_SUBJECT_SHORTCUT)
     mapping_graph = replace_predicates_in_graph(mapping_graph, R2RML_OBJECT_MAP, RML_STAR_OBJECT_MAP)
-    mapping_graph = replace_predicates_in_graph(mapping_graph, R2RML_OBJECT_CONSTANT_SHORTCUT, RML_STAR_OBJECT_CONSTANT_SHORTCUT)
+    mapping_graph = replace_predicates_in_graph(mapping_graph, R2RML_OBJECT_SHORTCUT,
+                                                RML_STAR_OBJECT_SHORTCUT)
 
     return mapping_graph
 
 
 def _expand_constant_shortcut_properties(mapping_graph):
     """
-    Expand constant shortcut properties rml:subject, rr:predicate, rml:object and rr:graph.
+    Expand constant shortcut properties.
     See R2RML specification (https://www.w3.org/2001/sw/rdb2rdf/r2rml/#constant).
     """
 
-    constant_properties = [RML_STAR_SUBJECT_MAP, R2RML_PREDICATE_MAP, RML_STAR_OBJECT_MAP, R2RML_GRAPH_MAP]
-    constant_shortcuts = [RML_STAR_SUBJECT_CONSTANT_SHORTCUT, R2RML_PREDICATE_CONSTANT_SHORTCUT,
-                          RML_STAR_OBJECT_CONSTANT_SHORTCUT, R2RML_GRAPH_CONSTANT_SHORTCUT]
+    constant_shortcuts_dict = {
+        RML_STAR_SUBJECT_SHORTCUT: RML_STAR_SUBJECT_MAP,
+        R2RML_PREDICATE_SHORTCUT: R2RML_PREDICATE_MAP,
+        RML_STAR_OBJECT_SHORTCUT: RML_STAR_OBJECT_MAP,
+        R2RML_GRAPH_SHORTCUT: R2RML_GRAPH_MAP,
+        FNML_FUNCTION_SHORTCUT: FNML_FUNCTION_MAP,
+        FNML_RETURN_SHORTCUT: FNML_RETURN_MAP,
+        FNML_PARAMETER_SHORTCUT: FNML_PARAMETER_MAP,
+        FNML_VALUE_SHORTCUT: FNML_VALUE_SHORTCUT
+    }
 
-    for constant_property, constant_shortcut in zip(constant_properties, constant_shortcuts):
+    for constant_shortcut, constant_property in constant_shortcuts_dict.items():
         for s, o in mapping_graph.query(f'SELECT ?s ?o WHERE {{?s <{constant_shortcut}> ?o .}}'):
             blanknode = rdflib.BNode()
             mapping_graph.add((s, rdflib.term.URIRef(constant_property), blanknode))
@@ -104,8 +116,8 @@ def _rdf_class_to_pom(mapping_graph):
     for tm, c in mapping_graph.query(query):
         blanknode = rdflib.BNode()
         mapping_graph.add((tm, rdflib.term.URIRef(R2RML_PREDICATE_OBJECT_MAP), blanknode))
-        mapping_graph.add((blanknode, rdflib.term.URIRef(R2RML_PREDICATE_CONSTANT_SHORTCUT), rdflib.RDF.type))
-        mapping_graph.add((blanknode, rdflib.term.URIRef(RML_STAR_OBJECT_CONSTANT_SHORTCUT), c))
+        mapping_graph.add((blanknode, rdflib.term.URIRef(R2RML_PREDICATE_SHORTCUT), rdflib.RDF.type))
+        mapping_graph.add((blanknode, rdflib.term.URIRef(RML_STAR_OBJECT_SHORTCUT), c))
 
     mapping_graph.remove((None, rdflib.term.URIRef(R2RML_CLASS), None))
 
@@ -186,10 +198,11 @@ def _complete_termtypes(mapping_graph):
     query = 'SELECT DISTINCT ?om ?pom WHERE { ' \
             f'?pom <{RML_STAR_OBJECT_MAP}> ?om . ' \
             f'OPTIONAL {{ ?om <{R2RML_TERM_TYPE}> ?termtype . }} . ' \
-            f'OPTIONAL {{ ?om <{RML_REFERENCE}> ?column . }} . ' \
+            f'OPTIONAL {{ ?om <{RML_REFERENCE}> ?reference . }} . ' \
+            f'OPTIONAL {{ ?om <{FNML_EXECUTION}> ?execution . }} . ' \
             f'OPTIONAL {{ ?om <{R2RML_LANGUAGE}> ?language . }} . ' \
             f'OPTIONAL {{ ?om <{R2RML_DATATYPE}> ?datatype . }} . ' \
-            'FILTER ( !bound(?termtype) && ( bound(?column) || bound(?language) || bound(?datatype) ) ) }'
+            'FILTER ( !bound(?termtype) && ( bound(?reference) || bound(?execution) || bound(?language) || bound(?datatype) ) ) }'
     for om, _ in mapping_graph.query(query):
         mapping_graph.add((om, rdflib.term.URIRef(R2RML_TERM_TYPE), rdflib.term.URIRef(R2RML_LITERAL)))
 
@@ -277,12 +290,13 @@ def _transform_mappings_into_dataframe(mapping_graph, section_name):
     """
 
     # parse the mappings with the parsing queries
-    mapping_query_results = mapping_graph.query(MAPPING_PARSING_QUERY)
-    join_query_results = mapping_graph.query(JOIN_CONDITION_PARSING_QUERY)
+    rml_query_results = mapping_graph.query(RML_PARSING_QUERY)
+    join_query_results = mapping_graph.query(RML_JOIN_CONDITION_PARSING_QUERY)
+    fno_query_results = mapping_graph.query(FNO_PARSING_QUERY)
 
-    # mapping rules in graph to DataFrame
-    source_mappings_df = pd.DataFrame(mapping_query_results.bindings)
-    source_mappings_df.columns = source_mappings_df.columns.map(str)
+    # RML in graph to DataFrame
+    rml_df = pd.DataFrame(rml_query_results.bindings)
+    rml_df.columns = rml_df.columns.map(str)
 
     # # DEBUG
     # print("\n\nXXXXXXXXX\n_transform_mappings_into_dataframe> ")
@@ -296,27 +310,35 @@ def _transform_mappings_into_dataframe(mapping_graph, section_name):
     # create a dict with child triples maps in the keys and its join conditions in the values
     join_conditions_dict = _get_join_conditions_dict(join_query_results)
     # map the dict with the join conditions to the mapping rules in the DataFrame
-    source_mappings_df['object_join_conditions'] = source_mappings_df['object_map'].map(join_conditions_dict)
-    source_mappings_df['subject_join_conditions'] = source_mappings_df['subject_map'].map(join_conditions_dict)
+    rml_df['object_join_conditions'] = rml_df['object_map'].map(join_conditions_dict)
+    rml_df['subject_join_conditions'] = rml_df['subject_map'].map(join_conditions_dict)
     # needed for later hashing the dataframe
-    source_mappings_df['object_join_conditions'] = source_mappings_df['object_join_conditions'].where(
-        pd.notna(source_mappings_df['object_join_conditions']), '')
-    source_mappings_df['subject_join_conditions'] = source_mappings_df['subject_join_conditions'].where(
-        pd.notna(source_mappings_df['subject_join_conditions']), '')
+    rml_df['object_join_conditions'] = rml_df['object_join_conditions'].where(
+        pd.notna(rml_df['object_join_conditions']), '')
+    rml_df['subject_join_conditions'] = rml_df['subject_join_conditions'].where(
+        pd.notna(rml_df['subject_join_conditions']), '')
     # convert the join condition dicts to string (can later be converted back to dict)
-    source_mappings_df['object_join_conditions'] = source_mappings_df['object_join_conditions'].astype(str)
-    source_mappings_df['subject_join_conditions'] = source_mappings_df['subject_join_conditions'].astype(str)
+    rml_df['object_join_conditions'] = rml_df['object_join_conditions'].astype(str)
+    rml_df['subject_join_conditions'] = rml_df['subject_join_conditions'].astype(str)
 
     # convert all values to string
-    for i, row in source_mappings_df.iterrows():
-        for col in source_mappings_df.columns:
+    for i, row in rml_df.iterrows():
+        for col in rml_df.columns:
             if pd.notna(row[col]):
-                source_mappings_df.at[i, col] = str(row[col])
+                rml_df.at[i, col] = str(row[col])
 
     # link the mapping rules to their data source name
-    source_mappings_df['source_name'] = section_name
+    rml_df['source_name'] = section_name
 
-    return source_mappings_df
+    # subject_map and object_map columns were used to handle join conditions, no longer needed
+    rml_df = rml_df.drop(columns=['subject_map', 'object_map'])
+
+    # FnO in graph to DataFrame
+    fno_df = pd.DataFrame(fno_query_results.bindings)
+    fno_df.columns = fno_df.columns.map(str)
+    fno_df = fno_df.applymap(str)
+
+    return rml_df, fno_df
 
 
 def _is_delimited_identifier(identifier):
@@ -387,18 +409,23 @@ def _validate_termtypes(mapping_graph):
 class MappingParser:
 
     def __init__(self, config):
+<<<<<<< HEAD
         self.mappings_df = pd.DataFrame(columns=MAPPINGS_DATAFRAME_COLUMNS)
         self.functions_df = pd.DataFrame(columns=FUNCTIONS_DATAFRAME_COLUMNS)
+=======
+        self.rml_df = pd.DataFrame(columns=RML_DATAFRAME_COLUMNS)
+        self.fno_df = pd.DataFrame(columns=FNO_DATAFRAME_COLUMNS)
+>>>>>>> ef574ab914ded6369ac73a60d909e43b20423d82
         self.config = config
 
     def __str__(self):
-        return str(self.mappings_df)
+        return str(self.rml_df)
 
     def __repr__(self):
-        return repr(self.mappings_df)
+        return repr(self.rml_df)
 
     def __len__(self):
-        return len(self.mappings_df)
+        return len(self.rml_df)
 
     def parse_mappings(self):
         self._get_from_r2_rml()
@@ -407,16 +434,17 @@ class MappingParser:
         self._infer_datatypes()
         self.validate_mappings()
 
-        logging.info(f'{len(self.mappings_df)} mapping rules retrieved.')
-
-        # generate mapping partitions
-        mapping_partitioner = MappingPartitioner(self.mappings_df, self.config)
-        self.mappings_df = mapping_partitioner.partition_mappings()
+        logging.info(f'{len(self.rml_df)} mapping rules retrieved.')
 
         # replace empty strings with NaN
-        self.mappings_df = self.mappings_df.replace(r'^\s*$', np.nan, regex=True)
+        self.rml_df = self.rml_df.replace(r'^\s*$', np.nan, regex=True)
+        self.fno_df = self.fno_df.replace(r'^\s*$', np.nan, regex=True)
 
-        return self.mappings_df
+        # generate mapping partitions
+        mapping_partitioner = MappingPartitioner(self.rml_df, self.config)
+        self.rml_df = mapping_partitioner.partition_mappings()
+
+        return self.rml_df, self.fno_df
 
     def _get_from_r2_rml(self):
         """
@@ -425,6 +453,7 @@ class MappingParser:
         each mapping file is parsed in parallel.
         """
 
+<<<<<<< HEAD
         if self.config.is_multiprocessing_enabled() and self.config.has_multiple_data_sources():
             pool = mp.Pool(self.config.get_number_of_processes())
             mappings_dfs = pool.map(self._parse_data_source_mapping_files, self.config.get_data_sources_sections())
@@ -443,11 +472,27 @@ class MappingParser:
         # subject_map and object_map columns were used to handle join conditions, no longer needed
         self.mappings_df = self.mappings_df.drop(columns=['subject_map', 'object_map'])
         self.parse_fno()
+=======
+        # before parsing was paralellized
+        #if self.config.is_multiprocessing_enabled() and self.config.has_multiple_data_sources():
+        #    pool = mp.Pool(self.config.get_number_of_processes())
+        #    rml_dfs = pool.map(self._parse_data_source_mapping_files, self.config.get_data_sources_sections())
+        #    self.rml_df = pd.concat([self.rml_df, pd.concat(rml_dfs)])
+        #else:
+        for section_name in self.config.get_data_sources_sections():
+            data_source_rml_df, data_source_fno_df = self._parse_data_source_mapping_files(section_name)
+            self.rml_df = pd.concat([self.rml_df, data_source_rml_df])
+            self.fno_df = pd.concat([self.fno_df, data_source_fno_df])
+
+        self.rml_df = self.rml_df.reset_index(drop=True)
+        self.fno_df = self.fno_df.reset_index(drop=True)
+>>>>>>> ef574ab914ded6369ac73a60d909e43b20423d82
 
     def parse_fno(self):
         """
         Parse and fetch functions from the mapppings
         """
+<<<<<<< HEAD
         for section_name in self.config.get_data_sources_sections():
             function_graph = self._parse_to_graph(section_name)
             funcs_df = fno.funcs_to_df(function_graph)
@@ -461,6 +506,9 @@ class MappingParser:
 
 
     def _parse_to_graph(self, section_name):
+=======
+
+>>>>>>> ef574ab914ded6369ac73a60d909e43b20423d82
         # create an empty graph
         mapping_graph = rdflib.Graph()
 
@@ -522,12 +570,12 @@ class MappingParser:
         # check termtypes are correct
         _validate_termtypes(mapping_graph)
 
-        # convert the SPARQL result set with the parsed mappings to DataFrame
+        # create RML and FnO dataframes
         return _transform_mappings_into_dataframe(mapping_graph, section_name)
 
     def _preprocess_mappings(self):
         # start by removing duplicated triples
-        self.mappings_df = self.mappings_df.drop_duplicates()
+        self.rml_df = self.rml_df.drop_duplicates()
 
         # complete rml:source with file_paths specified in the config file
         self._complete_rml_source_with_config_file_paths()
@@ -538,8 +586,7 @@ class MappingParser:
         # ignore the delimited identifiers (this is not conformant with R2MRL specification)
         self._remove_delimiters_from_mappings()
 
-        # create a unique id for each mapping rule
-        self.mappings_df.insert(0, 'id', self.mappings_df.reset_index(drop=True).index)
+        self._normalize_rml_star()
 
         self._remove_self_joins_no_condition()
 
@@ -549,17 +596,24 @@ class MappingParser:
         in the mapping file. If db_url is not provided but the logical source is rml:query, then it is an RML tabular
         view. For data files the source type is inferred from the file extension.
         """
-        
-        for i, mapping_rule in self.mappings_df.iterrows():
-            if self.config.has_database_url(mapping_rule['source_name']):
-                self.mappings_df.at[i, 'source_type'] = RDB
-            elif self.mappings_df.at[i, 'logical_source_type'] == RML_QUERY:
+
+        for i, rml_rule in self.rml_df.iterrows():
+            if self.config.has_database_url(rml_rule['source_name']):
+                self.rml_df.at[i, 'source_type'] = RDB
+            elif self.rml_df.at[i, 'logical_source_type'] == RML_QUERY:
                 # it is a query, but it is not an RDB, hence it is a tabular view
                 # assign CSV (it can also be Apache Parquet but format is automatically inferred)
+<<<<<<< HEAD
                 self.mappings_df.at[i, 'source_type'] = CSV
             elif self.mappings_df.at[i, 'logical_source_type'] == RML_SOURCE:
                 file_extension = os.path.splitext(str(mapping_rule['logical_source_value']))[1][1:].strip()
                 self.mappings_df.at[i, 'source_type'] = file_extension.upper()
+=======
+                self.rml_df.at[i, 'source_type'] = CSV
+            elif self.rml_df.at[i, 'logical_source_type'] == RML_SOURCE:
+                file_extension = os.path.splitext(str(rml_rule['logical_source_value']))[1][1:].strip()
+                self.rml_df.at[i, 'source_type'] = file_extension.upper()
+>>>>>>> ef574ab914ded6369ac73a60d909e43b20423d82
             else:
                 raise Exception('No source type could be retrieved for some mapping rules.')
 
@@ -571,9 +625,9 @@ class MappingParser:
 
         for section_name in self.config.get_data_sources_sections():
             if self.config.has_file_path(section_name):
-                self.mappings_df.loc[
-                    self.mappings_df['source_name'] == section_name, 'logical_source_type'] = RML_SOURCE
-                self.mappings_df.loc[self.mappings_df['source_name'] == section_name, 'logical_source_value'] = \
+                self.rml_df.loc[
+                    self.rml_df['source_name'] == section_name, 'logical_source_type'] = RML_SOURCE
+                self.rml_df.loc[self.rml_df['source_name'] == section_name, 'logical_source_value'] = \
                     self.config.get_file_path(section_name)
 
     def _remove_delimiters_from_mappings(self):
@@ -581,49 +635,49 @@ class MappingParser:
         Removes delimiters from all identifiers in the mapping rules in the input DataFrame.
         """
 
-        for i, mapping_rule in self.mappings_df.iterrows():
-            if self.mappings_df.at[i, 'logical_source_type'] == R2RML_TABLE_NAME:
-                self.mappings_df.at[i, 'logical_source_value'] = _get_undelimited_identifier(
-                    mapping_rule['logical_source_value'])
+        for i, rml_rule in self.rml_df.iterrows():
+            if self.rml_df.at[i, 'logical_source_type'] == R2RML_TABLE_NAME:
+                self.rml_df.at[i, 'logical_source_value'] = _get_undelimited_identifier(
+                    rml_rule['logical_source_value'])
 
-            if self.mappings_df.at[i, 'subject_map_type'] == R2RML_TEMPLATE:
-                self.mappings_df.at[i, 'subject_map_value'] = _get_valid_template_identifiers(
-                    mapping_rule['subject_map_value'])
-            elif self.mappings_df.at[i, 'subject_map_type'] == RML_REFERENCE:
-                self.mappings_df.at[i, 'subject_map_value'] = _get_undelimited_identifier(
-                    mapping_rule['subject_map_value'])
+            if self.rml_df.at[i, 'subject_map_type'] == R2RML_TEMPLATE:
+                self.rml_df.at[i, 'subject_map_value'] = _get_valid_template_identifiers(
+                    rml_rule['subject_map_value'])
+            elif self.rml_df.at[i, 'subject_map_type'] == RML_REFERENCE:
+                self.rml_df.at[i, 'subject_map_value'] = _get_undelimited_identifier(
+                    rml_rule['subject_map_value'])
 
-            if self.mappings_df.at[i, 'predicate_map_type'] == R2RML_TEMPLATE:
-                self.mappings_df.at[i, 'predicate_map_value'] = _get_valid_template_identifiers(
-                    mapping_rule['predicate_map_value'])
-            elif self.mappings_df.at[i, 'predicate_map_type'] == RML_REFERENCE:
-                self.mappings_df.at[i, 'predicate_map_value'] = _get_undelimited_identifier(
-                    mapping_rule['predicate_map_value'])
+            if self.rml_df.at[i, 'predicate_map_type'] == R2RML_TEMPLATE:
+                self.rml_df.at[i, 'predicate_map_value'] = _get_valid_template_identifiers(
+                    rml_rule['predicate_map_value'])
+            elif self.rml_df.at[i, 'predicate_map_type'] == RML_REFERENCE:
+                self.rml_df.at[i, 'predicate_map_value'] = _get_undelimited_identifier(
+                    rml_rule['predicate_map_value'])
 
-            if self.mappings_df.at[i, 'object_map_type'] == R2RML_TEMPLATE:
-                self.mappings_df.at[i, 'object_map_value'] = _get_valid_template_identifiers(
-                    mapping_rule['object_map_value'])
-            elif self.mappings_df.at[i, 'object_map_type'] == RML_REFERENCE:
-                self.mappings_df.at[i, 'object_map_value'] = _get_undelimited_identifier(
-                    mapping_rule['object_map_value'])
+            if self.rml_df.at[i, 'object_map_type'] == R2RML_TEMPLATE:
+                self.rml_df.at[i, 'object_map_value'] = _get_valid_template_identifiers(
+                    rml_rule['object_map_value'])
+            elif self.rml_df.at[i, 'object_map_type'] == RML_REFERENCE:
+                self.rml_df.at[i, 'object_map_value'] = _get_undelimited_identifier(
+                    rml_rule['object_map_value'])
 
-            if self.mappings_df.at[i, 'graph_map_type'] == R2RML_TEMPLATE:
-                self.mappings_df.at[i, 'graph_map_value'] = _get_valid_template_identifiers(
-                    mapping_rule['graph_map_value'])
-            elif self.mappings_df.at[i, 'graph_map_type'] == RML_REFERENCE:
-                self.mappings_df.at[i, 'graph_map_value'] = _get_undelimited_identifier(
-                    mapping_rule['graph_map_value'])
+            if self.rml_df.at[i, 'graph_map_type'] == R2RML_TEMPLATE:
+                self.rml_df.at[i, 'graph_map_value'] = _get_valid_template_identifiers(
+                    rml_rule['graph_map_value'])
+            elif self.rml_df.at[i, 'graph_map_type'] == RML_REFERENCE:
+                self.rml_df.at[i, 'graph_map_value'] = _get_undelimited_identifier(
+                    rml_rule['graph_map_value'])
 
             # if join_condition is not null and it is not empty
             for join_conditions_pos in ['subject_join_conditions', 'object_join_conditions']:
-                if pd.notna(mapping_rule[join_conditions_pos]) and mapping_rule[join_conditions_pos]:
-                    join_conditions = eval(mapping_rule[join_conditions_pos])
+                if pd.notna(rml_rule[join_conditions_pos]) and rml_rule[join_conditions_pos]:
+                    join_conditions = eval(rml_rule[join_conditions_pos])
                     for key, value in join_conditions.items():
                         join_conditions[key]['child_value'] = _get_undelimited_identifier(
                             join_conditions[key]['child_value'])
                         join_conditions[key]['parent_value'] = _get_undelimited_identifier(
                             join_conditions[key]['parent_value'])
-                        self.mappings_df.at[i, join_conditions_pos] = str(join_conditions)
+                        self.rml_df.at[i, join_conditions_pos] = str(join_conditions)
 
     def _infer_datatypes(self):
         """
@@ -636,33 +690,33 @@ class MappingParser:
         if not self.config.infer_sql_datatypes():
             return
 
-        for i, mapping_rule in self.mappings_df.iterrows():
+        for i, rml_rule in self.rml_df.iterrows():
             # datatype inference only applies to relational data sources
-            if (mapping_rule['source_type'] == RDB) and (
+            if (rml_rule['source_type'] == RDB) and (
                     # datatype inference only applies to literals
-                    str(mapping_rule['object_termtype']) == R2RML_LITERAL) and (
+                    str(rml_rule['object_termtype']) == R2RML_LITERAL) and (
                     # if the literal has a language tag or an overridden datatype, datatype inference does not apply
-                    pd.isna(mapping_rule['object_datatype']) and pd.isna(mapping_rule['object_language'])):
+                    pd.isna(rml_rule['object_datatype']) and pd.isna(rml_rule['object_language'])):
 
-                if mapping_rule['object_map_type'] == RML_REFERENCE:
-                    inferred_data_type = get_rdb_reference_datatype(self.config, mapping_rule,
-                                                                    mapping_rule['object_map_value'])
+                if rml_rule['object_map_type'] == RML_REFERENCE:
+                    inferred_data_type = get_rdb_reference_datatype(self.config, rml_rule,
+                                                                    rml_rule['object_map_value'])
 
                     if not inferred_data_type:
                         # no data type was inferred
                         continue
 
-                    self.mappings_df.at[i, 'object_datatype'] = inferred_data_type
-                    if self.mappings_df.at[i, 'logical_source_type'] == R2RML_TABLE_NAME:
+                    self.rml_df.at[i, 'object_datatype'] = inferred_data_type
+                    if self.rml_df.at[i, 'logical_source_type'] == R2RML_TABLE_NAME:
                         logging.debug(f"`{inferred_data_type}` datatype inferred for column "
-                                      f"`{mapping_rule['object_map_value']}` of table "
-                                      f"`{mapping_rule['logical_source_value']}` "
-                                      f"in data source `{mapping_rule['source_name']}`.")
-                    elif self.mappings_df.at[i, 'logical_source_type'] == RML_QUERY:
+                                      f"`{rml_rule['object_map_value']}` of table "
+                                      f"`{rml_rule['logical_source_value']}` "
+                                      f"in data source `{rml_rule['source_name']}`.")
+                    elif self.rml_df.at[i, 'logical_source_type'] == RML_QUERY:
                         logging.debug(f"`{inferred_data_type}` datatype inferred for reference "
-                                      f"`{mapping_rule['object_map_value']}` in query "
-                                      f"[{mapping_rule['logical_source_value']}] "
-                                      f"in data source `{mapping_rule['source_name']}`.")
+                                      f"`{rml_rule['object_map_value']}` in query "
+                                      f"[{rml_rule['logical_source_value']}] "
+                                      f"in data source `{rml_rule['source_name']}`.")
 
     def validate_mappings(self):
         """
@@ -672,20 +726,20 @@ class MappingParser:
         """
 
         # if there is a datatype or language tag then the object map termtype must be a rr:Literal
-        if len(self.mappings_df.loc[(self.mappings_df['object_termtype'] != R2RML_LITERAL) &
-                                    pd.notna(self.mappings_df['object_datatype']) &
-                                    pd.notna(self.mappings_df['object_language'])]) > 0:
+        if len(self.rml_df.loc[(self.rml_df['object_termtype'] != R2RML_LITERAL) &
+                                    pd.notna(self.rml_df['object_datatype']) &
+                                    pd.notna(self.rml_df['object_language'])]) > 0:
             raise Exception('Found object maps with a language tag or a datatype, '
                             'but that do not have termtype rr:Literal.')
 
         # language tags and datatypes cannot be used simultaneously, language tags are used if both are given
-        if len(self.mappings_df.loc[pd.notna(self.mappings_df['object_language']) &
-                                    pd.notna(self.mappings_df['object_datatype'])]) > 0:
+        if len(self.rml_df.loc[pd.notna(self.rml_df['object_language']) &
+                                    pd.notna(self.rml_df['object_datatype'])]) > 0:
             logging.warning('Found object maps with a language tag and a datatype. Both of them cannot be used '
                             'simultaneously for the same object map, and the language tag has preference.')
 
         # check that language tags are valid
-        language_tags = set(self.mappings_df['object_language'].dropna())
+        language_tags = set(self.rml_df['object_language'].dropna())
         # the place to look for valid language subtags is the IANA Language Subtag Registry
         # (https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry)
         for language_tag in language_tags:
@@ -696,9 +750,9 @@ class MappingParser:
 
         # check that a triples map id is not repeated in different data sources
         # Get unique source names and triples map identifiers
-        aux_mappings_df = self.mappings_df[['source_name', 'triples_map_id']].drop_duplicates()
+        aux_rml_df = self.rml_df[['source_name', 'triples_map_id']].drop_duplicates()
         # get repeated triples map identifiers
-        repeated_triples_map_ids = get_repeated_elements_in_list(list(aux_mappings_df['triples_map_id'].astype(str)))
+        repeated_triples_map_ids = get_repeated_elements_in_list(list(aux_rml_df['triples_map_id'].astype(str)))
         # of those repeated identifiers
         repeated_triples_map_ids = [tm_id for tm_id in repeated_triples_map_ids]
         if len(repeated_triples_map_ids) > 0:
@@ -706,19 +760,56 @@ class MappingParser:
                             f'{repeated_triples_map_ids}. '
                             'Check the mapping files, one triple map cannot be repeated in different data sources.')
 
+    def _normalize_rml_star(self):
+        # create a unique id for each (normalized) mapping rule
+        self.rml_df.insert(0, 'id', self.rml_df.reset_index(drop=True).index.astype(str))
+        self.rml_df['id'] = '#TM' + self.rml_df['id']
+
+        # create dicts from triples maps to ids and vice versa
+        tm_to_id_list_dict = {}
+        tm_to_id_dict = {}
+        id_to_tm_dict = dict(zip(self.rml_df['id'], self.rml_df['triples_map_id']))
+        for rule_id, rule_tm in id_to_tm_dict.items():
+            if rule_tm in tm_to_id_list_dict:
+                tm_to_id_list_dict[rule_tm].append(rule_id)
+            else:
+                tm_to_id_dict[rule_tm] = rule_id
+                tm_to_id_list_dict[rule_tm] = [rule_id]
+
+        # for quoted maps and ref object maps, add a new rule for each normalized rule they are referencing
+        for position in ['subject', 'object']:
+            quoted_tm_df = self.rml_df.loc[
+                self.rml_df[f'{position}_map_type'].isin([RML_STAR_QUOTED_TRIPLES_MAP, R2RML_PARENT_TRIPLES_MAP])]
+            for i, rml_rule in quoted_tm_df.iterrows():
+                for tm_id in tm_to_id_list_dict[rml_rule[f'{position}_map_value']]:
+                    rml_rule[f'{position}_map_value'] = tm_id
+                    self.rml_df = pd.concat([self.rml_df, rml_rule.to_frame().T], ignore_index=True)
+
+        # replace the old references with to triples maps with the new ids of the tiples maps
+        # this generates duplicates with the newly added rules, remove the duplicates
+        self.rml_df['subject_map_value'] = self.rml_df['subject_map_value'].map(tm_to_id_dict).fillna(
+            self.rml_df['subject_map_value'])
+        self.rml_df['object_map_value'] = self.rml_df['object_map_value'].map(tm_to_id_dict).fillna(
+            self.rml_df['object_map_value'])
+        self.rml_df = self.rml_df.drop_duplicates()
+
+        # replace the old triples map ids with the new ids
+        self.rml_df['triples_map_id'] = self.rml_df['id']
+        self.rml_df = self.rml_df.drop(columns='id')
+
     # TODO: deprecate
     def _remove_self_joins_no_condition(self):
-        for i, mapping_rule in self.mappings_df.iterrows():
-            if mapping_rule['object_map_type'] == R2RML_PARENT_TRIPLES_MAP:
-                parent_triples_map_rule = get_mapping_rule(self.mappings_df, mapping_rule['object_map_value'])
-                if mapping_rule['logical_source_value'] == parent_triples_map_rule['logical_source_value'] and str(
+        for i, rml_rule in self.rml_df.iterrows():
+            if rml_rule['object_map_type'] == R2RML_PARENT_TRIPLES_MAP:
+                parent_triples_map_rule = get_rml_rule(self.rml_df, rml_rule['object_map_value'])
+                if rml_rule['logical_source_value'] == parent_triples_map_rule['logical_source_value'] and str(
                         # str() is to be able to compare np.nan
-                        mapping_rule['iterator']) == str(parent_triples_map_rule['iterator']):
+                        rml_rule['iterator']) == str(parent_triples_map_rule['iterator']):
 
                     remove_join = True
                     # check that all conditions in the join condition have the same references
                     try:
-                        join_conditions = eval(mapping_rule['object_join_conditions'])
+                        join_conditions = eval(rml_rule['object_join_conditions'])
                         for key, join_condition in join_conditions.items():
                             if join_condition['child_value'] != join_condition['parent_value']:
                                 remove_join = False
@@ -726,6 +817,7 @@ class MappingParser:
                         # eval() has failed because there are no join conditions, the join can be removed
                         remove_join = True
 
+<<<<<<< HEAD
                     if remove_join and pd.notna(mapping_rule['object_join_conditions']):
                         self.mappings_df.at[i, 'object_map_type'] = parent_triples_map_rule.at['subject_map_type']
                         self.mappings_df.at[i, 'object_map_value'] = parent_triples_map_rule.at['subject_map_value']
@@ -742,3 +834,11 @@ class MappingParser:
                             f"The referencing object map in mapping rule `{mapping_rule['id']}` involves two different "
                             f"logical sources, but a join condition is missing.")
                         sys.exit()
+=======
+                    if remove_join and pd.notna(rml_rule['object_join_conditions']):
+                        self.rml_df.at[i, 'object_map_type'] = parent_triples_map_rule.at['subject_map_type']
+                        self.rml_df.at[i, 'object_map_value'] = parent_triples_map_rule.at['subject_map_value']
+                        self.rml_df.at[i, 'object_termtype'] = parent_triples_map_rule.at['subject_termtype']
+                        self.rml_df.at[i, 'object_join_conditions'] = np.nan
+                        logging.debug(f"Removed self-join from mapping rule `{rml_rule['triples_map_id']}`.")
+>>>>>>> ef574ab914ded6369ac73a60d909e43b20423d82
